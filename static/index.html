@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <title>投稿審查平台</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-50 text-slate-800 p-6">
+  <div class="max-w-4xl mx-auto">
+    <!-- 頂部角色切換列 -->
+    <div class="bg-white p-4 rounded-lg shadow-sm mb-6 flex flex-wrap justify-between items-center gap-4">
+      <h1 class="text-xl font-bold">投稿審查平台</h1>
+      <div class="flex items-center gap-2">
+        <span class="text-sm text-slate-500">目前模擬身分：</span>
+        <select id="identitySelect" onchange="switchIdentity()" class="border rounded px-3 py-1.5 text-sm bg-slate-50">
+          <option value="author|王小明">作者：高松燈</option>
+          <option value="author|李小華">作者：千早唐音</option>
+          <option value="editor|陳主編">編輯：長崎爽世</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- 作者工作台 -->
+    <div id="authorView" class="space-y-6">
+      <div class="bg-white p-5 rounded-lg shadow-sm">
+        <h2 id="formTitle" class="font-semibold mb-3">新增投稿（初始狀態：編輯中）</h2>
+        <input type="hidden" id="editId" />
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
+          <input id="categoryInput" placeholder="類別（如：科技、生活）" class="border rounded px-3 py-2 text-sm" />
+          <input id="titleInput" placeholder="文章標題" class="border rounded px-3 py-2 text-sm md:col-span-2" />
+        </div>
+        <textarea id="contentInput" rows="4" placeholder="請輸入文章內容..." class="w-full border rounded px-3 py-2 text-sm mb-3"></textarea>
+        <div class="flex gap-2">
+          <button onclick="saveSubmission()" class="bg-blue-600 text-white px-4 py-2 rounded text-sm hover:bg-blue-700">儲存稿件</button>
+          <button id="cancelEditBtn" onclick="resetForm()" class="hidden bg-slate-200 px-4 py-2 rounded text-sm">取消編輯</button>
+        </div>
+      </div>
+
+      <div class="bg-white p-5 rounded-lg shadow-sm">
+        <h2 class="font-semibold mb-3">我的投稿清單</h2>
+        <table class="w-full text-left text-sm border-collapse">
+          <thead>
+            <tr class="border-b text-slate-500">
+              <th class="py-2">類別</th>
+              <th class="py-2">標題</th>
+              <th class="py-2">審查狀態</th>
+              <th class="py-2 text-right">操作</th>
+            </tr>
+          </thead>
+          <tbody id="authorTableBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- 編輯審核台 -->
+    <div id="editorView" class="hidden space-y-6">
+      <div class="bg-white p-5 rounded-lg shadow-sm">
+        <h2 class="font-semibold mb-3">待審查清單（狀態：審查中）</h2>
+        <table class="w-full text-left text-sm border-collapse">
+          <thead>
+            <tr class="border-b text-slate-500">
+              <th class="py-2">作者</th>
+              <th class="py-2">類別</th>
+              <th class="py-2">標題</th>
+              <th class="py-2 text-right">操作</th>
+            </tr>
+          </thead>
+          <tbody id="editorTableBody"></tbody>
+        </table>
+      </div>
+
+      <!-- 稿件內容檢視與審核區 -->
+      <div id="reviewBox" class="hidden bg-white p-5 rounded-lg shadow-sm border-l-4 border-amber-500">
+        <div class="flex justify-between items-start mb-2">
+          <div>
+            <span id="reviewMeta" class="text-xs text-slate-500"></span>
+            <h3 id="reviewTitle" class="text-lg font-bold"></h3>
+          </div>
+          <button onclick="closeReview()" class="text-slate-400 hover:text-slate-600 text-sm">關閉</button>
+        </div>
+        <p id="reviewContent" class="whitespace-pre-wrap text-sm bg-slate-50 p-4 rounded my-4"></p>
+        <div class="flex gap-3">
+          <button id="approveBtn" class="bg-emerald-600 text-white px-4 py-2 rounded text-sm hover:bg-emerald-700">選擇通過（審查中 &rarr; 已通過）</button>
+          <button id="rejectBtn" class="bg-rose-600 text-white px-4 py-2 rounded text-sm hover:bg-rose-700">退回稿件（審查中 &rarr; 編輯中）</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let currentRole = "author";
+    let currentUser = "王小明";
+    let authorSubmissionsCache = [];
+
+    function apiFetch(url, options = {}) {
+      return fetch(url, {
+        ...options,
+        headers: {
+          "Content-Type": "application/json",
+          "X-Role": currentRole,
+          "X-User": encodeURIComponent(currentUser),
+          ...(options.headers || {})
+        }
+      }).then(async res => {
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || "操作失敗");
+        return data;
+      });
+    }
+
+    function switchIdentity() {
+      const [role, user] = document.getElementById("identitySelect").value.split("|");
+      currentRole = role;
+      currentUser = user;
+      resetForm();
+      closeReview();
+
+      if (role === "author") {
+        document.getElementById("authorView").classList.remove("hidden");
+        document.getElementById("editorView").classList.add("hidden");
+        loadAuthorList();
+      } else {
+        document.getElementById("authorView").classList.add("hidden");
+        document.getElementById("editorView").classList.remove("hidden");
+        loadEditorList();
+      }
+    }
+
+    // --- 作者端邏輯 ---
+    async function loadAuthorList() {
+      const list = await apiFetch("/api/author/submissions");
+      authorSubmissionsCache = list;
+      const tbody = document.getElementById("authorTableBody");
+      tbody.innerHTML = list.map(item => {
+        const isEditing = item.status === "編輯中";
+        const badgeColor = item.status === "已通過" ? "bg-emerald-100 text-emerald-700"
+                         : item.status === "審查中" ? "bg-amber-100 text-amber-700"
+                         : "bg-slate-100 text-slate-700";
+        return `
+          <tr class="border-b">
+            <td class="py-2.5">${item.category}</td>
+            <td class="py-2.5 font-medium">${item.title}</td>
+            <td class="py-2.5"><span class="px-2 py-0.5 rounded text-xs ${badgeColor}">${item.status}</span></td>
+            <td class="py-2.5 text-right space-x-2">
+              ${isEditing ? `
+                <button onclick="startEdit(${item.id})" class="text-blue-600 hover:underline">編輯</button>
+                <button onclick="submitItem(${item.id})" class="text-emerald-600 hover:underline">送出投稿</button>
+                <button onclick="deleteItem(${item.id})" class="text-rose-600 hover:underline">刪除</button>
+              ` : `<span class="text-xs text-slate-400">鎖定中</span>`}
+            </td>
+          </tr>`;
+      }).join("") || `<tr><td colspan="4" class="py-4 text-center text-slate-400">尚無投稿資料</td></tr>`;
+    }
+
+    async function saveSubmission() {
+      const id = document.getElementById("editId").value;
+      const payload = {
+        category: document.getElementById("categoryInput").value.trim(),
+        title: document.getElementById("titleInput").value.trim(),
+        content: document.getElementById("contentInput").value.trim()
+      };
+      if (!payload.category || !payload.title || !payload.content) return alert("請填寫完整欄位");
+
+      try {
+        if (id) {
+          await apiFetch(`/api/author/submissions/${id}`, { method: "PUT", body: JSON.stringify(payload) });
+        } else {
+          await apiFetch("/api/author/submissions", { method: "POST", body: JSON.stringify(payload) });
+        }
+        resetForm();
+        loadAuthorList();
+      } catch (e) { alert(e.message); }
+    }
+
+    function startEdit(id) {
+      const item = authorSubmissionsCache.find(x => x.id === id);
+      if (!item) return;
+      document.getElementById("editId").value = item.id;
+      document.getElementById("categoryInput").value = item.category;
+      document.getElementById("titleInput").value = item.title;
+      document.getElementById("contentInput").value = item.content;
+      document.getElementById("formTitle").innerText = `編輯稿件 #${item.id}`;
+      document.getElementById("cancelEditBtn").classList.remove("hidden");
+    }
+
+    function resetForm() {
+      document.getElementById("editId").value = "";
+      document.getElementById("categoryInput").value = "";
+      document.getElementById("titleInput").value = "";
+      document.getElementById("contentInput").value = "";
+      document.getElementById("formTitle").innerText = "新增投稿（初始狀態：編輯中）";
+      document.getElementById("cancelEditBtn").classList.add("hidden");
+    }
+
+    async function deleteItem(id) {
+      if (!confirm("確定刪除此編輯中稿件？")) return;
+      try {
+        await apiFetch(`/api/author/submissions/${id}`, { method: "DELETE" });
+        loadAuthorList();
+      } catch (e) { alert(e.message); }
+    }
+
+    async function submitItem(id) {
+      try {
+        await apiFetch(`/api/author/submissions/${id}/submit`, { method: "PATCH" });
+        loadAuthorList();
+      } catch (e) { alert(e.message); }
+    }
+
+    // --- 編輯端邏輯 ---
+    async function loadEditorList() {
+      const list = await apiFetch("/api/editor/submissions");
+      const tbody = document.getElementById("editorTableBody");
+      tbody.innerHTML = list.map(item => `
+        <tr class="border-b">
+          <td class="py-2.5">${item.author_name}</td>
+          <td class="py-2.5">${item.category}</td>
+          <td class="py-2.5 font-medium">${item.title}</td>
+          <td class="py-2.5 text-right">
+            <button onclick="viewDetail(${item.id})" class="text-blue-600 hover:underline">查看內容並審核</button>
+          </td>
+        </tr>
+      `).join("") || `<tr><td colspan="4" class="py-4 text-center text-slate-400">目前無待審查稿件</td></tr>`;
+    }
+
+    async function viewDetail(id) {
+      const item = await apiFetch(`/api/editor/submissions/${id}`);
+      document.getElementById("reviewMeta").innerText = `作者：${item.author_name} ｜ 類別：${item.category}`;
+      document.getElementById("reviewTitle").innerText = item.title;
+      document.getElementById("reviewContent").innerText = item.content;
+      document.getElementById("approveBtn").onclick = () => reviewAction(id, "approve");
+      document.getElementById("rejectBtn").onclick = () => reviewAction(id, "reject");
+      document.getElementById("reviewBox").classList.remove("hidden");
+    }
+
+    function closeReview() {
+      document.getElementById("reviewBox").classList.add("hidden");
+    }
+
+    async function reviewAction(id, action) {
+      try {
+        await apiFetch(`/api/editor/submissions/${id}/${action}`, { method: "PATCH" });
+        closeReview();
+        loadEditorList();
+      } catch (e) { alert(e.message); }
+    }
+
+    // 初始載入
+    loadAuthorList();
+  </script>
+</body>
+</html>

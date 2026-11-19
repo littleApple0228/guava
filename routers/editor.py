@@ -61,6 +61,7 @@ def reject_submission(
         raise HTTPException(status_code=400, detail="僅能退回「審查中」的稿件")
 
     item.status = SubmissionStatus.EDITING
+    item.is_rejected = True  # 新增這行：標記為曾被退件
     session.add(item)
     session.commit()
     session.refresh(item)

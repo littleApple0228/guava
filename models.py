@@ -37,6 +37,7 @@ class Submission(SubmissionBase, table=True):
     author_id: int = Field(foreign_key="user.id", index=True, description="作者 ID")
     author_name: str = Field(description="作者帳號名稱")
     status: SubmissionStatus = Field(default=SubmissionStatus.EDITING, description="審查狀態")
+    is_rejected: bool = Field(default=False, description="是否曾被編輯退回")
 
 
 # ================= API 請求與回應 Schema =================

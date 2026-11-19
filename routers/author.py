@@ -87,6 +87,7 @@ def submit_for_review(
         raise HTTPException(status_code=400, detail="只有「編輯中」的稿件可以送出審查")
 
     item.status = SubmissionStatus.REVIEWING
+    item.is_rejected = False  # 新增這行：重新送審後清除退件標記
     session.add(item)
     session.commit()
     session.refresh(item)
